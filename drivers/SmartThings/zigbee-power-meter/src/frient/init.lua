@@ -21,6 +21,8 @@ local clusters = require "st.zigbee.zcl.clusters"
 local SimpleMetering = clusters.SimpleMetering
 local PowerConfiguration = clusters.PowerConfiguration
 
+local LAST_REPORT_TIME = "LAST_REPORT_TIME"
+
 -- KK: local energyMeter_defaults = require "st.zigbee.defaults.energyMeter_defaults"
 
 local data_types = require "st.zigbee.data_types"
@@ -172,53 +174,58 @@ local function instantaneous_demand_handler(driver, device, value, zb_rx)
     raw_value = raw_value * multiplier / divisor * 1000
 
     local raw_value_watts = raw_value
-    device:emit_event_for_endpoint(zb_rx.address_header.src_endpoint.value, capabilities.powerMeter.power({ value = raw_value_watts, unit = "W" }, { visibility = { displayed = true }}))
+    device:emit_event_for_endpoint(zb_rx.address_header.src_endpoint.value, capabilities.powerMeter.power({ value = raw_value_watts, unit = "W" }))
 end
 
 local function energy_meter_handler(driver, device, value, zb_rx)
-    local raw_energy_register = value.value
-    log.trace("raw_value (register): " .. raw_energy_register)
-
-    if raw_energy_register < 0 or raw_energy_register >= 0xFFFFFFFFFFFF then
-        raw_energy_register = 0
-    end
-
+    local raw_value = value.value
+    log.trace("raw_value (1): "..raw_value)
     local multiplier = device:get_field(zigbee_constants.SIMPLE_METERING_MULTIPLIER_KEY) or 1
     local divisor = device:get_field(zigbee_constants.SIMPLE_METERING_DIVISOR_KEY) or 1
 
-    if divisor == 0 then
-        log.warn_with({ hub_logs = true }, "Simple metering divisor is 0; using 1 to avoid division by zero")
-        divisor = 1
+    if raw_value < 0 or raw_value >= 0xFFFFFFFFFFFF then
+        raw_value = 0
     end
-
-    log.trace(string.format("multiplier: %s", multiplier))
-    log.trace(string.format("divisor: %s", divisor))
-
-    local scaled_kwh = (raw_energy_register * multiplier) / divisor
-    log.trace("scaled energy (kWh): " .. scaled_kwh)
+    log.trace("raw_value (before * multiplier/divisor): "..raw_value)
+    log.trace("multiplier: "..multiplier)
+    log.trace("divisor: "..divisor)
+    raw_value = (raw_value * multiplier) / divisor
+    log.trace("raw_value * multiplier / divisor is "..raw_value)
 
     local offset = device:get_field(zigbee_constants.ENERGY_METER_OFFSET) or 0
-    log.trace("offset: " .. offset)
-    if scaled_kwh < offset then
+    log.trace("offset: "..offset)
+    if raw_value < offset then
+        --- somehow our value has gone below the offset, so we'll reset the offset, since the device seems to have
         offset = 0
         device:set_field(zigbee_constants.ENERGY_METER_OFFSET, offset, { persist = true })
-        log.trace("offset reset to 0")
+        log.trace("offset 0 was set ")
     end
+    raw_value = raw_value - offset
+    log.trace("raw_value - offset "..raw_value)
+    raw_value = raw_value * 1000 -- the unit of these values should be 'Wh'
+    log.trace("raw_value = raw_value * 1000: "..raw_value)
 
-    local net_kwh = scaled_kwh - offset
-    log.trace("net energy (kWh): " .. net_kwh)
-
-    local net_wh = net_kwh * 1000 -- convert to Wh for capability expectations
-    log.trace("net energy (Wh): " .. net_wh)
+    device:emit_event_for_endpoint(zb_rx.address_header.src_endpoint.value, capabilities.energyMeter.energy({ value = raw_value, unit = "Wh" }))
 
     local delta_energy = 0.0
     local current_power_consumption = device:get_latest_state("main", capabilities.powerConsumptionReport.ID, capabilities.powerConsumptionReport.powerConsumption.NAME)
     if current_power_consumption ~= nil then
-        delta_energy = math.max(net_wh - current_power_consumption.energy, 0.0)
+        delta_energy = math.max(raw_value - current_power_consumption.energy, 0.0)
     end
 
-    device:emit_event_for_endpoint(zb_rx.address_header.src_endpoint.value, capabilities.powerConsumptionReport.powerConsumption({ energy = net_wh, deltaEnergy = delta_energy }, { visibility = { displayed = true } }))
-    device:emit_event_for_endpoint(zb_rx.address_header.src_endpoint.value, capabilities.energyMeter.energy({ value = net_wh, unit = "Wh" }, { visibility = { displayed = true } }))
+    local current_time = os.time()
+    log.trace("current_time: "..current_time)
+    local last_report_time = device:get_field(LAST_REPORT_TIME) or 0
+    log.trace("last_report_time: "..last_report_time)
+    local next_report_time = last_report_time + 60 * 15 -- 15 mins, the minimum interval allowed between reports
+    log.trace("next_report_time: "..next_report_time)
+    if current_time < next_report_time then
+        log.trace("EXIT: ")
+        return
+    end
+
+    device:set_field(LAST_REPORT_TIME, current_time, { persist = true })
+    device:emit_event_for_endpoint(zb_rx.address_header.src_endpoint.value, capabilities.powerConsumptionReport.powerConsumption({energy = raw_value, deltaEnergy = delta_energy }))
 end
 
 local frient_power_meter_handler = {

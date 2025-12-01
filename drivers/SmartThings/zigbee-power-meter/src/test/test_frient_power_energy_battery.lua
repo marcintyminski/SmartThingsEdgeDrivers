@@ -25,6 +25,7 @@ local cluster_base = require "st.zigbee.cluster_base"
 local data_types = require "st.zigbee.data_types"
 
 local DEVELCO_MANUFACTURER_CODE = 0x1015
+local LAST_REPORT_TIME = "LAST_REPORT_TIME"
 
 local mock_device = test.mock_device.build_test_zigbee_device(
         {
@@ -68,53 +69,7 @@ test.register_message_test(
             {
                 channel = "capability",
                 direction = "send",
-                message = mock_device:generate_test_message("main", capabilities.powerMeter.power({ value = 2700.0, unit = "W" }, {visibility = { displayed = true }}))
-            }
-        }
-)
-
-test.register_message_test(
-        "CurrentSummationDelivered Report should be handled.",
-        {
-            {
-                channel = "zigbee",
-                direction = "receive",
-                message = { mock_device.id, SimpleMetering.attributes.Divisor:build_test_attr_report(mock_device, 1000) }
-            },
-            {
-                channel = "zigbee",
-                direction = "receive",
-                message = { mock_device.id, SimpleMetering.attributes.Multiplier:build_test_attr_report(mock_device, 1) },
-            },
-            {
-                channel = "zigbee",
-                direction = "receive",
-                message = { mock_device.id, SimpleMetering.attributes.CurrentSummationDelivered:build_test_attr_report(mock_device, 2700) },
-            },
-            {
-                channel = "capability",
-                direction = "send",
-                message = mock_device:generate_test_message("main", capabilities.powerConsumptionReport.powerConsumption({energy = 2700.0, deltaEnergy = 0.0 }, { visibility = { displayed = true }}))
-            },
-            {
-                channel = "capability",
-                direction = "send",
-                message = mock_device:generate_test_message("main", capabilities.energyMeter.energy({ value = 2700.0, unit = "Wh" }, { visibility = { displayed = true }}))
-            },
-            {
-                channel = "zigbee",
-                direction = "receive",
-                message = { mock_device.id, SimpleMetering.attributes.CurrentSummationDelivered:build_test_attr_report(mock_device, 3000) },
-            },
-            {
-                channel = "capability",
-                direction = "send",
-                message = mock_device:generate_test_message("main", capabilities.powerConsumptionReport.powerConsumption({energy = 3000.0, deltaEnergy = 300.0 }, { visibility = { displayed = true }}))
-            },
-            {
-                channel = "capability",
-                direction = "send",
-                message = mock_device:generate_test_message("main", capabilities.energyMeter.energy({ value = 3000.0, unit = "Wh" }, { visibility = { displayed = true }}))
+                message = mock_device:generate_test_message("main", capabilities.powerMeter.power({ value = 2700.0, unit = "W" }))
             }
         }
 )
@@ -325,6 +280,41 @@ test.register_coroutine_test(
 
             test.socket.zigbee:__set_channel_ordering("relaxed")
 
+        end
+)
+
+test.register_coroutine_test(
+        "CurrentSummationDelivered Report should be handled.",
+        function()
+            local current_time = os.time() - 60 * 16
+            mock_device:set_field(LAST_REPORT_TIME, current_time)
+
+            test.socket.zigbee:__queue_receive({ mock_device.id, SimpleMetering.attributes.Divisor:build_test_attr_report(mock_device, 1000) })
+            test.socket.zigbee:__queue_receive({ mock_device.id, SimpleMetering.attributes.Multiplier:build_test_attr_report(mock_device, 1) })
+            test.socket.zigbee:__queue_receive({ mock_device.id, SimpleMetering.attributes.CurrentSummationDelivered:build_test_attr_report(mock_device, 2700)  })
+
+            test.socket.capability:__expect_send(
+                    mock_device:generate_test_message("main", capabilities.energyMeter.energy({ value = 2700.0, unit = "Wh" }))
+            )
+            test.socket.capability:__expect_send(
+                    mock_device:generate_test_message("main", capabilities.powerConsumptionReport.powerConsumption({energy = 2700.0, deltaEnergy = 0.0 }))
+            )
+        end
+)
+
+test.register_coroutine_test(
+        "CurrentSummationDelivered report should be handled without powerConsumptionReport because 15 min didn't pass since last report",
+        function()
+            local current_time = os.time() - 60 * 14
+            mock_device:set_field(LAST_REPORT_TIME, current_time)
+
+            test.socket.zigbee:__queue_receive({ mock_device.id, SimpleMetering.attributes.Divisor:build_test_attr_report(mock_device, 1000) })
+            test.socket.zigbee:__queue_receive({ mock_device.id, SimpleMetering.attributes.Multiplier:build_test_attr_report(mock_device, 1) })
+            test.socket.zigbee:__queue_receive({ mock_device.id, SimpleMetering.attributes.CurrentSummationDelivered:build_test_attr_report(mock_device, 2700)  })
+
+            test.socket.capability:__expect_send(
+                    mock_device:generate_test_message("main", capabilities.energyMeter.energy({ value = 2700.0, unit = "Wh" }))
+            )
         end
 )
 

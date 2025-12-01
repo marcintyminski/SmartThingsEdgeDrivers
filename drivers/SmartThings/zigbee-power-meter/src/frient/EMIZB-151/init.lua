@@ -335,10 +335,10 @@ local frient_emi = {
         attr = {
             [SimpleMetering.ID] = {
                 [CurrentSummationReceived] = current_summation_received_handler,
-                [SimpleMetering.attributes.CurrentSummationDelivered.ID] = current_summation_delivered_handler,
+                --[SimpleMetering.attributes.CurrentSummationDelivered.ID] = current_summation_delivered_handler,
                 [SimpleMetering.attributes.InstantaneousDemand.ID] = instantaneous_demand_handler,
-                [SimpleMetering.attributes.Multiplier.ID] = simple_metering_multiplier_handler,
-                [SimpleMetering.attributes.Divisor.ID] = simple_metering_divisor_handler
+                --[SimpleMetering.attributes.Multiplier.ID] = simple_metering_multiplier_handler,
+                --[SimpleMetering.attributes.Divisor.ID] = simple_metering_divisor_handler
             },
             [ElectricalMeasurement.ID] = {
                 --[ElectricalMeasurement.attributes.ACPowerDivisor.ID] = powerMeter_defaults.electrical_measurement_divisor_handler,
