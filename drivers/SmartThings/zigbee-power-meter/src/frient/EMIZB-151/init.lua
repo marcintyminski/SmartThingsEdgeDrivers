@@ -152,7 +152,7 @@ local instantaneous_demand_handler = function(driver, device, value, zb_rx)
     local raw_value = value.value
     --- demand = demand received * Multipler/Divisor
     local multiplier = device:get_field(zigbee_constants.SIMPLE_METERING_MULTIPLIER_KEY) or 1
-    local divisor = device:get_field(zigbee_constants.SIMPLE_METERING_DIVISOR_KEY) or 1
+    local divisor = device:get_field(zigbee_constants.SIMPLE_METERING_DIVISOR_KEY) or 1000
 
     if divisor == 0 then
         log.warn_with({ hub_logs = true }, "Metering scale divisor is 0; using 1 to avoid division by zero")
@@ -170,12 +170,12 @@ local current_summation_delivered_handler = function(driver, device, value, zb_r
 
     -- Handle potential overflow values
     if raw_value < 0 or raw_value >= 0xFFFFFFFFFFFF then
-        log.warn_with({ hub_logs = true }, "Invalid CurrentSummationDelivered value received: " .. tostring(raw_value))
-        raw_value = 0
+        log.warn_with({ hub_logs = true }, "Invalid CurrentSummationDelivered value received; ignoring report")
+        return
     end
 
     local multiplier = device:get_field(zigbee_constants.SIMPLE_METERING_MULTIPLIER_KEY) or 1
-    local divisor = device:get_field(zigbee_constants.SIMPLE_METERING_DIVISOR_KEY) or 1
+    local divisor = device:get_field(zigbee_constants.SIMPLE_METERING_DIVISOR_KEY) or 1000
 
     if divisor == 0 then
         log.warn_with({ hub_logs = true }, "Metering scale divisor is 0; using 1 to avoid division by zero")
@@ -194,12 +194,12 @@ local current_summation_received_handler = function(driver, device, value, zb_rx
 
     -- Handle potential overflow values
     if raw_value < 0 or raw_value >= 0xFFFFFFFFFFFF then
-        log.warn_with({ hub_logs = true }, "Invalid CurrentSummationReceived value received: " .. tostring(raw_value))
-        raw_value = 0
+        log.warn_with({ hub_logs = true }, "Invalid CurrentSummationReceived value received; ignoring report")
+        return
     end
 
     local multiplier = device:get_field(zigbee_constants.SIMPLE_METERING_MULTIPLIER_KEY) or 1
-    local divisor = device:get_field(zigbee_constants.SIMPLE_METERING_DIVISOR_KEY) or 1
+    local divisor = device:get_field(zigbee_constants.SIMPLE_METERING_DIVISOR_KEY) or 1000
 
     if divisor == 0 then
         log.warn_with({ hub_logs = true }, "Metering scale divisor is 0; using 1 to avoid division by zero")
@@ -215,7 +215,8 @@ local current_summation_received_handler = function(driver, device, value, zb_rx
         delta_energy = math.max(raw_value - current_power_consumption.energy, 0.0)
     end
     device:emit_event(capabilities.powerConsumptionReport.powerConsumption({energy = raw_value, deltaEnergy = delta_energy }))
-    device:emit_component_event(device.profile.components['main'], capabilities.energyMeter.energy({ value = raw_value, unit = "Wh" }))
+    device:emit_component_event(device.profile.components['production'], capabilities.energyMeter.energy({ value = raw_value, unit = "Wh" }))
+    --device:emit_component_event(device.profile.components['production'], capabilities.energyMeter.energy({ value = raw_value, unit = "Wh" }))
 end
 
 local electrical_measurement_ac_voltage_multiplier_handler = function(driver, device, multiplier, zb_rx)
@@ -303,16 +304,32 @@ local rms_current_handler = function(component)
 end
 
 local function simple_metering_divisor_handler(driver, device, divisor, zb_rx)
-    if not zb_rx.body.zcl_header.frame_ctrl:is_mfg_specific_set() then
-        local raw_value = divisor.value
-        log.info_with({ hub_logs = true }, "Received Simple Metering divisor: " .. tostring(raw_value))
+    local header = zb_rx.body and zb_rx.body.zcl_header
+    local is_mfg_specific = header and header.frame_ctrl:is_mfg_specific_set()
+    local has_expected_type = divisor ~= nil and divisor.ID == data_types.Uint24.ID
 
-        if raw_value == 0 then
-            log.warn_with({ hub_logs = true }, "Simple metering divisor is 0; using 1 to avoid division by zero")
-            raw_value = 1
-        end
-        device:set_field(zigbee_constants.SIMPLE_METERING_DIVISOR_KEY, raw_value, { persist = true })
-      end
+    if is_mfg_specific or not has_expected_type then
+        log.debug_with(
+            { hub_logs = true },
+            string.format(
+                "Ignoring divisor report (mfg_specific=%s, type=%s, value=%s)",
+                tostring(is_mfg_specific),
+                has_expected_type and "Uint24" or tostring(divisor and divisor.NAME or "nil"),
+                tostring(divisor and divisor.value)
+            )
+        )
+        return
+    end
+
+    local raw_value = divisor.value
+    log.info_with({ hub_logs = true }, "Received Simple Metering divisor: " .. tostring(raw_value))
+
+    if raw_value == 0 then
+        log.warn_with({ hub_logs = true }, "Simple metering divisor is 0; using 1 to avoid division by zero")
+        raw_value = 1
+    end
+
+    device:set_field(zigbee_constants.SIMPLE_METERING_DIVISOR_KEY, raw_value, { persist = true })
 end
 
 local function simple_metering_multiplier_handler(driver, device, multiplier, zb_rx)
@@ -335,10 +352,10 @@ local frient_emi = {
         attr = {
             [SimpleMetering.ID] = {
                 [CurrentSummationReceived] = current_summation_received_handler,
-                --[SimpleMetering.attributes.CurrentSummationDelivered.ID] = current_summation_delivered_handler,
+                [SimpleMetering.attributes.CurrentSummationDelivered.ID] = current_summation_delivered_handler,
                 [SimpleMetering.attributes.InstantaneousDemand.ID] = instantaneous_demand_handler,
-                --[SimpleMetering.attributes.Multiplier.ID] = simple_metering_multiplier_handler,
-                --[SimpleMetering.attributes.Divisor.ID] = simple_metering_divisor_handler
+                [SimpleMetering.attributes.Multiplier.ID] = simple_metering_multiplier_handler,
+                [SimpleMetering.attributes.Divisor.ID] = simple_metering_divisor_handler
             },
             [ElectricalMeasurement.ID] = {
                 --[ElectricalMeasurement.attributes.ACPowerDivisor.ID] = powerMeter_defaults.electrical_measurement_divisor_handler,

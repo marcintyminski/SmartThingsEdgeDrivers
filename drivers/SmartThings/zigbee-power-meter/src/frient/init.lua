@@ -29,6 +29,7 @@ local data_types = require "st.zigbee.data_types"
 
 local log = require "log"
 local DEVELCO_MANUFACTURER_CODE = 0x1015
+local SIMPLE_METERING_DIVISOR = 1000
 
 local ZIGBEE_POWER_METER_FINGERPRINTS = {
   { model = "ZHEMI101", preferences = true, battery = true, MIN_BAT = 3.4 , MAX_BAT = 4.5 },
@@ -138,35 +139,29 @@ local function info_changed(driver, device, event, args)
     end)
 end
 
---[[
-
 local function simple_metering_divisor_handler(driver, device, divisor, zb_rx)
-    if not zb_rx.body.zcl_header.frame_ctrl:is_mfg_specific_set() then
-        log.debug(divisor.value)
-        local raw_value = divisor.value
-
-        if raw_value == 0 then
-            log.warn_with({ hub_logs = true }, "Simple metering divisor is 0; using 1 to avoid division by zero")
-            raw_value = 1
-        end
-
-        device:set_field(zigbee_constants.SIMPLE_METERING_DIVISOR_KEY, raw_value, { persist = true })
+    local header = zb_rx.body and zb_rx.body.zcl_header
+    if header and header.frame_ctrl:is_mfg_specific_set() then
+        log.debug_with({ hub_logs = true }, string.format("Ignoring manufacturer-specific divisor report: %s", tostring(divisor.value)))
+        device:set_field(zigbee_constants.SIMPLE_METERING_DIVISOR_KEY, SIMPLE_METERING_DIVISOR, { persist = true })
+        return
     end
+
+    local raw_value = divisor.value or SIMPLE_METERING_DIVISOR
+
+    if raw_value == 0 then
+        log.warn_with({ hub_logs = true }, "Simple metering divisor reported as 0; forcing divisor to 1000")
+        raw_value = SIMPLE_METERING_DIVISOR
+    end
+
+    device:set_field(zigbee_constants.SIMPLE_METERING_DIVISOR_KEY, raw_value, { persist = true })
 end
-
-local function simple_metering_multiplier_handler(driver, device, multiplier, zb_rx)
-    if not zb_rx.body.zcl_header.frame_ctrl:is_mfg_specific_set() then
-        log.debug(multiplier.value)
-        local raw_value = multiplier.value
-        device:set_field(zigbee_constants.SIMPLE_METERING_MULTIPLIER_KEY, raw_value, { persist = true })
-    end
-end]]
 
 local function instantaneous_demand_handler(driver, device, value, zb_rx)
     local raw_value = value.value
     --- demand = demand received * Multipler/Divisor
     local multiplier = device:get_field(zigbee_constants.SIMPLE_METERING_MULTIPLIER_KEY) or 1
-    local divisor = device:get_field(zigbee_constants.SIMPLE_METERING_DIVISOR_KEY) or 1
+    local divisor = device:get_field(zigbee_constants.SIMPLE_METERING_DIVISOR_KEY) or 1000
     if raw_value < -8388607 or raw_value >= 8388607 then
         raw_value = 0
     end
@@ -181,7 +176,7 @@ local function energy_meter_handler(driver, device, value, zb_rx)
     local raw_value = value.value
     log.trace("raw_value (1): "..raw_value)
     local multiplier = device:get_field(zigbee_constants.SIMPLE_METERING_MULTIPLIER_KEY) or 1
-    local divisor = device:get_field(zigbee_constants.SIMPLE_METERING_DIVISOR_KEY) or 1
+    local divisor = device:get_field(zigbee_constants.SIMPLE_METERING_DIVISOR_KEY) or 1000
 
     if raw_value < 0 or raw_value >= 0xFFFFFFFFFFFF then
         raw_value = 0
@@ -247,9 +242,7 @@ local frient_power_meter_handler = {
             [SimpleMetering.ID] = {
                 [SimpleMetering.attributes.CurrentSummationDelivered.ID] = energy_meter_handler,
                 [SimpleMetering.attributes.InstantaneousDemand.ID] = instantaneous_demand_handler,
-                -- that's already handled by the framework
-                -- KK -- [SimpleMetering.attributes.Multiplier.ID] = simple_metering_multiplier_handler,
-                -- KK -- [SimpleMetering.attributes.Divisor.ID] = simple_metering_divisor_handler
+                [SimpleMetering.attributes.Divisor.ID] = simple_metering_divisor_handler
             }
         }
     },
