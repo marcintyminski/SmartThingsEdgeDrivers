@@ -4,6 +4,8 @@ components:
   capabilities:
   - id: securitySystem
     version: 1
+  - id: lockCodes
+    version: 1
   - id: battery
     version: 1
   - id: tamperAlert
@@ -12,3 +14,86 @@ components:
     version: 1
   categories:
   - name: SmartLock
+preferences:
+  - name: pinMap
+    title: PIN Map
+    description: "Format: 1234:Alice,4321:Bob. Entries are added/updated; existing entries are kept."
+    required: false
+    preferenceType: string
+    definition:
+      stringType: text
+      default: ""
+  - name: rfidMap
+    title: RFID Map
+    description: "Format: ABCD1234:Alice,EFGH5678:Bob. Entries are added/updated; existing entries are kept."
+    required: false
+    preferenceType: string
+    definition:
+      stringType: text
+      default: ""
+  - name: deletePinMap
+    title: Delete PINs
+    description: "Comma-separated PINs to delete. Example: 1234,4321"
+    required: false
+    preferenceType: string
+    definition:
+      stringType: text
+      default: ""
+  - name: deleteRfidMap
+    title: Delete RFIDs
+    description: "Comma-separated RFIDs to delete. Example: ABCD1234,EFGH5678"
+    required: false
+    preferenceType: string
+    definition:
+      stringType: text
+      default: ""
+  - name: showPinSnapshot
+    title: Show PIN Snapshot
+    description: "Display the current PIN/RFID list in the device UI (sensitive)."
+    required: false
+    preferenceType: boolean
+    definition:
+      default: true
+  - name: minCodeLength
+    title: Minimum PIN Length
+    description: "Minimum PIN length reported to the app."
+    required: false
+    preferenceType: integer
+    definition:
+      minimum: 1
+      maximum: 32
+      default: 4
+  - name: maxCodeLength
+    title: Maximum PIN Length
+    description: "Maximum PIN length reported to the app."
+    required: false
+    preferenceType: integer
+    definition:
+      minimum: 1
+      maximum: 32
+      default: 8
+  - name: maxCodes
+    title: Maximum Codes
+    description: "Maximum number of PIN codes reported to the app."
+    required: false
+    preferenceType: integer
+    definition:
+      minimum: 1
+      maximum: 500
+      default: 30
+  - name: length
+    title: Length
+    description: "length"
+    required: false
+    preferenceType: integer
+    definition:
+      minimum: 0
+      maximum: 30
+      default: 5
+  - name: exitDelay
+    title: Exit Delay
+    description: "Turn on exit delay when arming. Duration in seconds. Default is 60 seconds. Set to 0 to disable exit delay."
+    required: false
+    preferenceType: boolean
+    definition:
+      default: false
